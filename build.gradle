@@ -1,0 +1,96 @@
+plugins {
+	id 'application'
+	id 'maven-publish'
+	id 'signing'
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation group: 'org.sonarsource.sonarlint.core', name: 'sonarlint-core', version: '5.3.1.31327'
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_1_8
+	targetCompatibility = JavaVersion.VERSION_1_8
+	withJavadocJar()
+	withSourcesJar()
+}
+
+application {
+	mainClass = 'io.github.spinsie.chirp.Analyzer'
+}
+
+version = {
+	def stdout = new ByteArrayOutputStream()
+	def result = exec {
+		commandLine 'git', 'describe', '--tags', '--match', 'v[0-9]*'
+		standardOutput = stdout
+		ignoreExitValue true
+	}
+	if (result.getExitValue() != 0) {
+		return 'unspecified'
+	}
+	return stdout.toString().trim().substring(1)
+}()
+
+jar {
+	manifest {
+		attributes 'Implementation-Title': project.name,
+			'Implementation-Version': project.version,
+			'Main-Class': 'io.github.spinsie.chirp.Analyzer',
+			'Sealed': 'true'
+	}
+}
+
+signing {
+	required = { gradle.taskGraph.hasTask('uploadArchives') }
+	sign publishing.publications
+}
+
+tasks.withType(Jar) {
+	from('LICENSE') {
+		into 'META-INF'
+	}
+}
+
+publishing {
+	repositories {
+		maven {
+			url = { 'https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/' }
+			credentials {
+				username = findProperty('ossrhUsername')
+				password = findProperty('ossrhPassword')
+			}
+		}
+	}
+	publications {
+		sonatype(MavenPublication) {
+			from components.java
+			pom {
+				name = 'chirp'
+				description = 'Library and CLI Code Analyzer'
+				url = 'https://github.com/spinsie/chirp'
+				scm {
+					connection = 'scm:git:git://github.com/spinsie/chirp.git'
+					developerConnection = 'scm:git:ssh://github.com/spinsie/chirp.git'
+					url = 'https://github.com/spinsie/chirp'
+				}
+				licenses {
+					license {
+						name = 'MIT License'
+						url = 'https://github.com/spinsie/chirp/blob/main/LICENSE'
+					}
+				}
+				developers {
+					developer {
+						name = 'spinsie'
+						email = '009101@gmail.com'
+					}
+				}
+			}
+		}
+	}
+}
