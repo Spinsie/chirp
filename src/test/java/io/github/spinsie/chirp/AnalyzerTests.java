@@ -19,11 +19,14 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class AnalyzerTests {
+
+	private static final List<String> ruleKeys = Arrays.asList("java:S1220", "java:S106", "java:S100");
 
 	@BeforeClass
 	public static void setup() throws InterruptedException, IOException {
@@ -37,7 +40,6 @@ public class AnalyzerTests {
 		Analyzer.main(command.split(" "));
 		final Gson gson = new Gson();
 		final JsonObject findings = gson.fromJson(new FileReader(Paths.get("build/its/java/findings.json").toFile()), JsonObject.class);
-		final List<String> ruleKeys = Arrays.asList("java:S1220", "java:S106", "java:S100");
 		final JsonArray a = findings.get("findings").getAsJsonArray();
 		assertEquals("issue count", ruleKeys.size(), a.size());
 		for (JsonElement e : a) {
@@ -52,45 +54,41 @@ public class AnalyzerTests {
 		final ByteArrayOutputStream bos = new ByteArrayOutputStream();
 		final PrintStream p = new PrintStream(bos);
 		System.setOut(p);
-		try {
-			Analyzer.main(command.split(" "));
-			p.flush();
-			final String output = new String(bos.toByteArray(), StandardCharsets.UTF_8);
-			int count = 0;
-			for (int i = 0; i < output.length();) {
-				i = output.indexOf("+----- Finding ----->", i) + 1;
-				if (i == 0) {
-					break;
-				}
-				count++;
+		Analyzer.main(command.split(" "));
+		p.flush();
+		final String output = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+		System.setOut(old);
+		int count = 0;
+		for (int i = 0; i < output.length();) {
+			i = output.indexOf("+----- Finding ----->", i) + 1;
+			if (i == 0) {
+				break;
 			}
-			assertEquals("issue count", 3, count);
-		} finally {
-			System.setOut(old);
+			count++;
+		}
+		assertEquals("issue count", 3, count);
+		for (String ruleKey : ruleKeys) {
+			assertTrue("contains issue", output.contains(ruleKey));
 		}
 	}
 
 	@Test
 	public void qualityTest() throws IOException {
-		final String libraryPaths = String.join(",", Arrays.stream(System.getProperty("java.class.path").split(File.pathSeparator))
+		final String libraryPaths = Arrays.stream(System.getProperty("java.class.path").split(File.pathSeparator))
 				.filter(s -> Files.exists(Paths.get(s)))
-				.collect(Collectors.toList()));
-		final Analysis a = Analyzer.lint(new HashMap<String, String>() {
-			{
-				put("lang", "java");
-				put("severity.level", "major");
-				put("rule.exclude.file", ".chirp/rule.exclude");
-				//main
-				put("sonar.sources", "src/main/java");
-				put("sonar.java.binaries", "build/classes/java/main");
-				put("sonar.java.libraries", libraryPaths);
-				// test
-				put("sonar.tests", "src/test/java");
-				put("sonar.java.test.binaries", "build/classes/java/test");
-				put("sonar.java.test.libraries", libraryPaths);
-			}
-		});
-		assertEquals("Unused Ignores " + a.unusedIgnores.toString(), 0, a.unusedIgnores.size());
-		assertEquals(a.findings.stream().map(f -> System.lineSeparator() + f.message).collect(Collectors.joining()), 0, a.findings.size());
+				.collect(Collectors.joining(","));
+		final Map<String, String> properties = new HashMap<>();
+		properties.put("lang", "java");
+		properties.put("severity.level", "major");
+		properties.put("rule.exclude.file", ".chirp/rule.exclude");
+		properties.put("sonar.sources", "src/main/java");
+		properties.put("sonar.java.binaries", "build/classes/java/main");
+		properties.put("sonar.java.libraries", libraryPaths);
+		properties.put("sonar.tests", "src/test/java");
+		properties.put("sonar.java.test.binaries", "build/classes/java/test");
+		properties.put("sonar.java.test.libraries", libraryPaths);
+		final Analysis a = Analyzer.lint(properties);
+		assertEquals("Unused Ignores " + a.unusedIgnores().toString(), 0, a.unusedIgnores().size());
+		assertEquals(a.findings().stream().map(f -> System.lineSeparator() + f.message()).collect(Collectors.joining()), 0, a.findings().size());
 	}
 }

@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -46,36 +47,17 @@ import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
 import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneAnalysisConfiguration;
 import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneGlobalConfiguration;
 
+/**
+ * Provides code analysis 
+ *
+ * @see Analyzer#lint(Map)
+ */
 public final class Analyzer {
 
 	private static final Map<Language, String> pluginURLs = new EnumMap<>(Language.class);
 
 	static {
 		pluginURLs.put(Language.JAVA, "https://repo1.maven.org/maven2/org/sonarsource/java/sonar-java-plugin/6.15.1.26025/sonar-java-plugin-6.15.1.26025.jar");
-	}
-
-	public enum IssueSeverity {
-		BLOCKER, CRITICAL, MAJOR, MINOR, INFO;
-	}
-
-	public enum IssueType {
-		BUG, VULNERABILITY, CODE_SMELL;
-	}
-
-	public static final class Finding {
-		public IssueSeverity severity;
-		public IssueType type;
-		public String message;
-		public String ref;
-		public Issue issue;
-	}
-
-	public static final class Analysis {
-		public List<Finding> findings;
-		public List<String> unusedIgnores;
-		public AnalysisResults results;
-		private IssueSeverity severityLevel;
-		private StandaloneSonarLintEngineImpl engine;
 	}
 
 	private static final class ScannerProperties {
@@ -87,6 +69,66 @@ public final class Analyzer {
 		private List<ClientInputFile> sources;
 		private List<ClientInputFile> testSources;
 		private Map<String, String> raw;
+	}
+
+	public enum IssueSeverity {
+		BLOCKER, CRITICAL, MAJOR, MINOR, INFO;
+	}
+
+	public enum IssueType {
+		BUG, VULNERABILITY, CODE_SMELL;
+	}
+
+	public static final class Finding {
+
+		private IssueSeverity severity;
+		private IssueType type;
+		private String message;
+		private String ref;
+		private Issue issue;
+
+		public IssueSeverity severity() {
+			return severity;
+		}
+
+		public IssueType type() {
+			return type;
+		}
+
+		public String message() {
+			return message;
+		}
+
+		public String ref() {
+			return ref;
+		}
+
+		public Issue issue() {
+			return issue;
+		}
+
+	}
+
+	public static final class Analysis {
+
+		private List<Finding> findings;
+		private List<String> unusedIgnores;
+		private AnalysisResults results;
+		private IssueSeverity severityLevel;
+		private StandaloneSonarLintEngineImpl engine;
+
+		public List<Finding> findings() {
+			return findings;
+		}
+
+		public List<String> unusedIgnores() {
+			return unusedIgnores;
+		}
+
+		public Collection<ClientInputFile> failedAnalysisFiles() {
+			return results.failedAnalysisFiles();
+		}
+
 	}
 
 	private static ScannerProperties setup(Map<String, ?> properties) throws IOException {
@@ -137,57 +179,14 @@ public final class Analyzer {
 		return Collections.emptyList();
 	}
 
-	public static Analysis lint(Map<String, ?> properties) throws IOException {
-		final ScannerProperties props = setup(properties);
-		final StandaloneGlobalConfiguration.Builder scb = StandaloneGlobalConfiguration.builder()
-			.setExtraProperties(props.raw);
-		for (Language lang : props.languages) {
-			scb.addEnabledLanguage(lang);
-			scb.addPlugin(cachePlugin(lang));
-		}
-		final StandaloneAnalysisConfiguration.Builder sacb = StandaloneAnalysisConfiguration.builder()
-			.setBaseDir(props.baseDir)
-			.addInputFiles(props.sources)
-			.addInputFiles(props.testSources)
-			.addExcludedRules(props.ruleExclude.stream().map(RuleKey::parse).collect(Collectors.toList()));
-		final List<String> ignored = new LinkedList<>();
-		final List<Finding> findings = new ArrayList<>();
-		final StandaloneSonarLintEngineImpl engine = new StandaloneSonarLintEngineImpl(scb.build());
-		final AnalysisResults results = engine.analyze(sacb.build(), i -> {
-			if (IssueSeverity.valueOf(i.getSeverity()).ordinal() > props.severityLevel.ordinal()) {
-				return;
-			}
-			try {
-				final String hash = hash(i);
-				if (!props.issueIgnore.contains(hash)) {
-					findings.add(finding(i, hash));
-				} else {
-					ignored.add(hash);
-				}
-			} catch (NoSuchAlgorithmException | IOException e1) {
-				e1.printStackTrace();
-			}
-		}, logger(), null);
-		Collections.sort(findings, (lhs, rhs) -> Integer.compare(lhs.severity.ordinal(), rhs.severity.ordinal()));
-		final List<String> unusedIgnores = new LinkedList<>(props.issueIgnore);
-		unusedIgnores.removeAll(ignored);
-		final Analysis analysis = new Analysis();
-		analysis.results = results;
-		analysis.findings = findings;
-		analysis.unusedIgnores = unusedIgnores;
-		analysis.engine = engine;
-		analysis.severityLevel = props.severityLevel;
-		return analysis;
-	}
-
 	private static URL cachePlugin(Language lang) throws IOException {
 		final String url = Objects.requireNonNull(pluginURLs.get(lang));
 		final boolean windows = System.getProperty("os.name").contains("Windows");
 		final Path cache;
 		if (windows) {
-			cache = Paths.get(System.getenv("LOCALAPPDATA")).resolve("temp/sonarlint");
+			cache = Paths.get(System.getenv("LOCALAPPDATA")).resolve("temp/chirp");
 		} else {
-			cache = Paths.get("/tmp/sonarlint");
+			cache = Paths.get("/tmp/chirp");
 		}
 		final File plugin = cache.resolve(lang.getLanguageKey() + ".jar").toFile();
 		if (!plugin.exists()) {
@@ -388,6 +387,7 @@ public final class Analyzer {
 			return lines.map(String::trim)
 				.filter(l -> !l.isEmpty())
 				.filter(l -> !l.startsWith("//"))
+				.map(l -> l.replaceFirst("\\S+//.*$", ""))
 				.collect(Collectors.toList());
 		}
 	}
@@ -417,7 +417,7 @@ public final class Analyzer {
 		final Analysis analysis = lint(props);
 		System.out.println(configuration(analysis.engine, analysis.severityLevel));
 		for (ClientInputFile f : analysis.results.failedAnalysisFiles()) {
-			System.err.println(Instant.now() + " [ERROR] Failed toLowerCase analyze " + f.relativePath());
+			System.err.println(Instant.now() + " [ERROR] Failed to analyze " + f.relativePath());
 		}
 		if (!analysis.unusedIgnores.isEmpty()) {
 			System.err.println(Instant.now() + " [WARN] Unused issue ignores: " + analysis.unusedIgnores + System.lineSeparator());
@@ -435,6 +435,49 @@ public final class Analyzer {
 			analysis.findings.forEach(i -> System.out.println(i.message));
 		}
 		System.out.println(summary(analysis.findings));
+	}
+
+	public static Analysis lint(Map<String, ?> properties) throws IOException {
+		final ScannerProperties props = setup(properties);
+		final StandaloneGlobalConfiguration.Builder scb = StandaloneGlobalConfiguration.builder()
+			.setExtraProperties(props.raw);
+		for (Language lang : props.languages) {
+			scb.addEnabledLanguage(lang);
+			scb.addPlugin(cachePlugin(lang));
+		}
+		final StandaloneAnalysisConfiguration.Builder sacb = StandaloneAnalysisConfiguration.builder()
+			.setBaseDir(props.baseDir)
+			.addInputFiles(props.sources)
+			.addInputFiles(props.testSources)
+			.addExcludedRules(props.ruleExclude.stream().map(RuleKey::parse).collect(Collectors.toList()));
+		final List<String> ignored = new LinkedList<>();
+		final List<Finding> findings = new ArrayList<>();
+		final StandaloneSonarLintEngineImpl engine = new StandaloneSonarLintEngineImpl(scb.build());
+		final AnalysisResults results = engine.analyze(sacb.build(), i -> {
+			if (IssueSeverity.valueOf(i.getSeverity()).ordinal() > props.severityLevel.ordinal()) {
+				return;
+			}
+			try {
+				final String hash = hash(i);
+				if (!props.issueIgnore.contains(hash)) {
+					findings.add(finding(i, hash));
+				} else {
+					ignored.add(hash);
+				}
+			} catch (NoSuchAlgorithmException | IOException e1) {
+				e1.printStackTrace();
+			}
+		}, logger(), null);
+		Collections.sort(findings, (lhs, rhs) -> Integer.compare(lhs.severity.ordinal(), rhs.severity.ordinal()));
+		final List<String> unusedIgnores = new LinkedList<>(props.issueIgnore);
+		unusedIgnores.removeAll(ignored);
+		final Analysis analysis = new Analysis();
+		analysis.results = results;
+		analysis.findings = findings;
+		analysis.unusedIgnores = unusedIgnores;
+		analysis.engine = engine;
+		analysis.severityLevel = props.severityLevel;
+		return analysis;
 	}
 
 }
