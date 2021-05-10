@@ -48,7 +48,7 @@ import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneAnalysisCo
 import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneGlobalConfiguration;
 
 /**
- * Provides code analysis 
+ * Provides clients an API or main entrypoint for code analysis.
  *
  * @see Analyzer#lint(Map)
  */
@@ -79,6 +79,9 @@ public final class Analyzer {
 		BUG, VULNERABILITY, CODE_SMELL;
 	}
 
+	/**
+	 * Data class for a single issue during analysis.
+	 */
 	public static final class Finding {
 
 		private IssueSeverity severity;
@@ -87,28 +90,39 @@ public final class Analyzer {
 		private String ref;
 		private Issue issue;
 
+		/** @return the issue severity */
 		public IssueSeverity severity() {
 			return severity;
 		}
 
+		/** @return the issue type */
 		public IssueType type() {
 			return type;
 		}
 
+		/** @return a formatted string representing this Finding */
 		public String message() {
 			return message;
 		}
 
+		/**
+		 * The binary URL encoded SHA1 hashes of anlaysis finding attributes used to identify and ignore findings during analysis.
+		 * @return the reference hash
+		 */
 		public String ref() {
 			return ref;
 		}
 
+		/** @return the issue underlying this Finding */
 		public Issue issue() {
 			return issue;
 		}
 
 	}
 
+	/**
+	 * Data class for the entire analysis.
+	 */
 	public static final class Analysis {
 
 		private List<Finding> findings;
@@ -117,14 +131,28 @@ public final class Analyzer {
 		private IssueSeverity severityLevel;
 		private StandaloneSonarLintEngineImpl engine;
 
+		/**
+		 *
+		 * @return
+		 */
 		public List<Finding> findings() {
 			return findings;
 		}
 
+		/**
+		 * References are binary URL encoded SHA1 hashes of anlaysis finding attributes used to identify and ignore findings during analysis.
+		 * This list reports the unused references.
+		 * @return list of unused ingore references
+		 */
 		public List<String> unusedIgnores() {
 			return unusedIgnores;
 		}
 
+		/**
+		 * Input files for which there were analysis errors.
+		 * The analyzers failed to correctly handle these files, and therefore there might be issues missing or no issues at all for these files.
+		 * @return list of failed analysis files
+		 */
 		public Collection<ClientInputFile> failedAnalysisFiles() {
 			return results.failedAnalysisFiles();
 		}
