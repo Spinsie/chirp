@@ -30,6 +30,7 @@ public class AnalyzerTests {
 
 	@BeforeClass
 	public static void setup() throws InterruptedException, IOException {
+		Files.createDirectories(Paths.get("build/its/java"));
 		final ProcessBuilder pb = new ProcessBuilder(Arrays.asList("javac", "-d", "build/its/java", "its/java/Test.java"));
 		assertEquals("Compilation", 0, pb.start().waitFor());
 	}
