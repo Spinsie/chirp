@@ -2,6 +2,7 @@ plugins {
 	id 'application'
 	id 'maven-publish'
 	id 'signing'
+	id 'jacoco'
 }
 
 repositories {
@@ -9,7 +10,17 @@ repositories {
 }
 
 dependencies {
-	implementation group: 'org.sonarsource.sonarlint.core', name: 'sonarlint-core', version: '5.3.1.31327'
+	implementation 'org.sonarsource.sonarlint.core:sonarlint-core:5.3.1.31327'
+	testImplementation 'junit:junit:4.13.2'
+	testImplementation 'com.google.code.gson:gson:2.8.6'
+}
+
+jacocoTestReport {
+	dependsOn test
+	reports {
+		xml.enabled true
+		html.enabled true
+	}
 }
 
 java {

@@ -189,10 +189,15 @@ public final class Analyzer {
 		sb.append(ls).append("Rule: ").append(i.getRuleName()).append(ln);
 		sb.append(ls).append("Message: ").append(i.getMessage()).append(ln);
 		sb.append(ls).append(ln);
-		sb.append(ls).append("File: ").append(i.getInputFile().relativePath()).append(":").append(i.getStartLine()).append(ln);
-		final String[] lines = i.getInputFile().contents().split(ln);
-		for (int j = i.getStartLine() - 1, k = i.getEndLine(); j < k; ++j) {
-			sb.append(ls).append("> ").append(lines[j].trim()).append(ln);
+		sb.append(ls).append("File: ").append(i.getInputFile().relativePath());
+		if (i.getTextRange() != null) {
+			sb.append(":").append(i.getStartLine()).append(ln);
+			final String[] lines = i.getInputFile().contents().split(ln);
+			for (int j = i.getStartLine() - 1, k = i.getEndLine(); j < k; ++j) {
+				sb.append(ls).append("> ").append(lines[j].trim()).append(ln);
+			}
+		} else {
+			sb.append(ln);
 		}
 		sb.append(ls).append(ln);
 		sb.append(ls).append("Reference: ").append(hash).append(ln);
@@ -221,10 +226,11 @@ public final class Analyzer {
 		final String ln = System.lineSeparator();
 		final String ls = "| ";
 		final StringBuilder sb = new StringBuilder();
+		final Map<IssueType, List<Finding>> groups = findings.stream().collect(Collectors.groupingBy(f -> f.type));
 		sb.append("+---------- Summary ----------+").append(ln);
-		sb.append(ls).append(String.format("Bugs %22s |", findings.stream().filter(f -> f.type == IssueType.BUG).count())).append(ln);
-		sb.append(ls).append(String.format("Vulerabilities %12s |", findings.stream().filter(f -> f.type == IssueType.VULNERABILITY).count())).append(ln);
-		sb.append(ls).append(String.format("Code Smells %15s |", findings.stream().filter(f -> f.type == IssueType.CODE_SMELL).count())).append(ln);
+		sb.append(ls).append(String.format("Bugs %22s |", groups.getOrDefault(IssueType.BUG, Collections.emptyList()).size())).append(ln);
+		sb.append(ls).append(String.format("Vulerabilities %12s |", groups.getOrDefault(IssueType.VULNERABILITY, Collections.emptyList()).size())).append(ln);
+		sb.append(ls).append(String.format("Code Smells %15s |", groups.getOrDefault(IssueType.CODE_SMELL, Collections.emptyList()).size())).append(ln);
 		sb.append("+-----------------------------+").append(ln);
 		return sb.toString();
 	}
@@ -243,6 +249,7 @@ public final class Analyzer {
 	private static String json(List<Finding> findings) {
 		final StringBuilder sb = new StringBuilder();
 		final String ln = System.lineSeparator();
+		final Map<IssueType, List<Finding>> groups = findings.stream().collect(Collectors.groupingBy(f -> f.type));
 		final IntFunction<StringBuilder> tab = n -> {
 			for (int i = 0; i < n; ++i) {
 				sb.append('\t');
@@ -251,9 +258,9 @@ public final class Analyzer {
 		};
 		sb.append("{").append(ln);
 		tab.apply(1).append("\"summary\": {").append(ln);
-		tab.apply(2).append("\"bugs\": ").append(findings.stream().filter(f -> f.type == IssueType.BUG).count()).append(",").append(ln);
-		tab.apply(2).append("\"vulerabilities\": ").append(findings.stream().filter(f -> f.type == IssueType.VULNERABILITY).count()).append(",").append(ln);
-		tab.apply(2).append("\"code_smells\": ").append(findings.stream().filter(f -> f.type == IssueType.CODE_SMELL).count()).append(ln);
+		tab.apply(2).append("\"bugs\": ").append(groups.getOrDefault(IssueType.BUG, Collections.emptyList()).size()).append(",").append(ln);
+		tab.apply(2).append("\"vulerabilities\": ").append( groups.getOrDefault(IssueType.VULNERABILITY, Collections.emptyList()).size()).append(",").append(ln);
+		tab.apply(2).append("\"code_smells\": ").append( groups.getOrDefault(IssueType.CODE_SMELL, Collections.emptyList()).size()).append(ln);
 		tab.apply(1).append("}").append(',').append(ln);
 		tab.apply(1).append("\"findings\": ").append("[").append(ln);
 		for (int i = 0, length = findings.size(), last = length - 1; i < length; ++i) {
@@ -265,11 +272,16 @@ public final class Analyzer {
 			tab.apply(3).append("\"rule_name\": ").append('"').append(f.issue.getRuleName().replace("\\", "\\\\").replace("\"", "\\\"")).append('"').append(',').append(ln);
 			tab.apply(3).append("\"message\": ").append('"').append(f.issue.getMessage().replace("\\", "\\\\").replace("\"", "\\\"")).append('"').append(',').append(ln);
 			tab.apply(3).append("\"location\": {").append(ln);
-			tab.apply(4).append("\"file\": ").append('"').append(f.issue.getInputFile().relativePath().replace("\\", "/")).append('"').append(',').append(ln);
-			tab.apply(4).append("\"start_line\": ").append(f.issue.getStartLine()).append(',').append(ln);
-			tab.apply(4).append("\"start_line_offset\": ").append(f.issue.getStartLineOffset()).append(',').append(ln);
-			tab.apply(4).append("\"end_line\": ").append(f.issue.getEndLine()).append(',').append(ln);
-			tab.apply(4).append("\"end_line_offset\": ").append(f.issue.getEndLineOffset()).append(ln);
+			tab.apply(4).append("\"file\": ").append('"').append(f.issue.getInputFile().relativePath().replace("\\", "/")).append('"');
+			if (f.issue.getTextRange() != null) {
+				sb.append(',').append(ln);
+				tab.apply(4).append("\"start_line\": ").append(f.issue.getStartLine()).append(',').append(ln);
+				tab.apply(4).append("\"start_line_offset\": ").append(f.issue.getStartLineOffset()).append(',').append(ln);
+				tab.apply(4).append("\"end_line\": ").append(f.issue.getEndLine()).append(',').append(ln);
+				tab.apply(4).append("\"end_line_offset\": ").append(f.issue.getEndLineOffset()).append(ln);
+			} else {
+				sb.append(ln);
+			}
 			tab.apply(3).append("},").append(ln);
 			tab.apply(3).append("\"ref\": ").append('"').append(f.ref).append('"').append(ln);
 			tab.apply(2).append("}");
@@ -323,13 +335,16 @@ public final class Analyzer {
 
 	private static String hash(Issue issue) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-1");
-		return Base64.getUrlEncoder().withoutPadding().encodeToString(md.digest(String.join(";",
-				issue.getRuleKey(),
-				issue.getInputFile().relativePath(),
-				issue.getStartLine().toString(),
-				issue.getEndLine().toString(),
-				issue.getStartLineOffset().toString(),
-				issue.getEndLineOffset().toString()).getBytes()));
+		final List<String> properties = new LinkedList<>();
+		properties.add(issue.getRuleKey());
+		properties.add(issue.getInputFile().relativePath());
+		if (issue.getTextRange() != null) {
+			properties.add(issue.getStartLine().toString());
+			properties.add(issue.getEndLine().toString());
+			properties.add(issue.getStartLineOffset().toString());
+			properties.add(issue.getEndLineOffset().toString());
+		}
+		return Base64.getUrlEncoder().withoutPadding().encodeToString(md.digest(String.join(";" ,properties).getBytes()));
 	}
 
 	private static List<String> readFile(String filePath) throws IOException {
@@ -343,10 +358,10 @@ public final class Analyzer {
 			final String arg = it.next();
 			if (arg.startsWith("--")) {
 				final String word = arg.substring(2);
-				if ("quiet".equals(word)) {
+				if ("verbose".equals(word)) {
 					map.put(word, null);
 				} else if (it.hasNext()) {
-					map.put(word, it.next().replace('-', '.'));
+					map.put(word.replace('-', '.'), it.next());
 				}
 			}
 		}
@@ -357,7 +372,7 @@ public final class Analyzer {
 		final Map<String, String> props = parse(args);
 		final Optional<Path> outputPath = Optional.ofNullable(props.get("output.file"))
 				.map(Paths::get);
-		final boolean quiet = props.containsKey("quiet");
+		final boolean verbose = props.containsKey("verbose");
 		final Analysis analysis = lint(props);
 		System.out.println(configuration(analysis.engine, analysis.severityLevel));
 		for (ClientInputFile f : analysis.results.failedAnalysisFiles()) {
@@ -375,10 +390,10 @@ public final class Analyzer {
 				fos.flush();
 			}
 		}
-		if (!quiet) {
+		if ((verbose && outputPath.isPresent()) || !outputPath.isPresent()) {
 			analysis.findings.forEach(i -> System.out.println(i.message));
-			System.out.println(summary(analysis.findings));
 		}
+		System.out.println(summary(analysis.findings));
 	}
 
 }
