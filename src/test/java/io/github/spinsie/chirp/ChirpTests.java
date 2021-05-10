@@ -7,7 +7,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import io.github.spinsie.chirp.Analyzer.Analysis;
+import io.github.spinsie.chirp.Chirp.Analysis;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileReader;
@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-public class AnalyzerTests {
+public class ChirpTests {
 
 	private static final List<String> ruleKeys = Arrays.asList("java:S1220", "java:S106", "java:S100");
 
@@ -38,7 +38,7 @@ public class AnalyzerTests {
 	@Test
 	public void testJava() throws IOException {
 		final String command = "--lang java --sonar-sources its/java --sonar-java-binaries build/its/java --output-file build/its/java/findings.json";
-		Analyzer.main(command.split(" "));
+		Chirp.main(command.split(" "));
 		final Gson gson = new Gson();
 		final JsonObject findings = gson.fromJson(new FileReader(Paths.get("build/its/java/findings.json").toFile()), JsonObject.class);
 		final JsonArray a = findings.get("findings").getAsJsonArray();
@@ -55,7 +55,7 @@ public class AnalyzerTests {
 		final ByteArrayOutputStream bos = new ByteArrayOutputStream();
 		final PrintStream p = new PrintStream(bos);
 		System.setOut(p);
-		Analyzer.main(command.split(" "));
+		Chirp.main(command.split(" "));
 		p.flush();
 		final String output = new String(bos.toByteArray(), StandardCharsets.UTF_8);
 		System.setOut(old);
@@ -88,7 +88,7 @@ public class AnalyzerTests {
 		properties.put("sonar.tests", "src/test/java");
 		properties.put("sonar.java.test.binaries", "build/classes/java/test");
 		properties.put("sonar.java.test.libraries", libraryPaths);
-		final Analysis a = Analyzer.lint(properties);
+		final Analysis a = Chirp.scan(properties);
 		assertEquals("Unused Ignores " + a.unusedIgnores().toString(), 0, a.unusedIgnores().size());
 		assertEquals(a.findings().stream().map(f -> System.lineSeparator() + f.message()).collect(Collectors.joining()), 0, a.findings().size());
 	}

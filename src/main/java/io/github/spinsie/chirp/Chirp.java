@@ -50,9 +50,9 @@ import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneGlobalConf
 /**
  * Provides clients an API or main entrypoint for code analysis.
  *
- * @see Analyzer#lint(Map)
+ * @see Chirp#scan(Map)
  */
-public final class Analyzer {
+public final class Chirp {
 
 	private static final Map<Language, String> pluginURLs = new EnumMap<>(Language.class);
 
@@ -106,7 +106,7 @@ public final class Analyzer {
 		}
 
 		/**
-		 * The binary URL encoded SHA1 hashes of anlaysis finding attributes used to identify and ignore findings during analysis.
+		 * The identifing hash for this Finding.
 		 * @return the reference hash
 		 */
 		public String ref() {
@@ -121,7 +121,7 @@ public final class Analyzer {
 	}
 
 	/**
-	 * Data class for the entire analysis.
+	 * Data class for the scan findings.
 	 */
 	public static final class Analysis {
 
@@ -132,8 +132,8 @@ public final class Analyzer {
 		private StandaloneSonarLintEngineImpl engine;
 
 		/**
-		 *
-		 * @return
+		 * Provides analysis findings that weren't ignored or excluded through configuration.
+		 * @return list of analysis findings
 		 */
 		public List<Finding> findings() {
 			return findings;
@@ -183,7 +183,7 @@ public final class Analyzer {
 		final Optional<String> ruleExcludeFile = Optional.ofNullable(sp.raw.get("rule.exclude.file"));
 		if (ruleExcludeFile.isPresent()) {
 			sp.ruleExclude.addAll(readFile(ruleExcludeFile.get()));
-		};
+		}
 		sp.sources = findSources(sp.baseDir, sp.raw.get("sonar.sources"), false);
 		sp.testSources = findSources(sp.baseDir, sp.raw.get("sonar.tests"), true);
 		return sp;
@@ -442,7 +442,7 @@ public final class Analyzer {
 		final Optional<Path> outputPath = Optional.ofNullable(props.get("output.file"))
 				.map(Paths::get);
 		final boolean verbose = props.containsKey("verbose");
-		final Analysis analysis = lint(props);
+		final Analysis analysis = scan(props);
 		System.out.println(configuration(analysis.engine, analysis.severityLevel));
 		for (ClientInputFile f : analysis.results.failedAnalysisFiles()) {
 			System.err.println(Instant.now() + " [ERROR] Failed to analyze " + f.relativePath());
@@ -465,7 +465,14 @@ public final class Analyzer {
 		System.out.println(summary(analysis.findings));
 	}
 
-	public static Analysis lint(Map<String, ?> properties) throws IOException {
+	/**
+	 * Performs a scan with the given properties and returns {@link Analysis} data for quality gates.
+	 *
+	 * @param properties data map for all language and configuration specific options
+	 * @return the resulting analysis data
+	 * @throws IOException
+	 */
+	public static Analysis scan(Map<String, ?> properties) throws IOException {
 		final ScannerProperties props = setup(properties);
 		final StandaloneGlobalConfiguration.Builder scb = StandaloneGlobalConfiguration.builder()
 			.setExtraProperties(props.raw);
