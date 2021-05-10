@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -29,14 +30,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.sonarsource.sonarlint.core.StandaloneSonarLintEngineImpl;
 import org.sonarsource.sonarlint.core.client.api.common.Language;
 import org.sonarsource.sonarlint.core.client.api.common.LogOutput;
+import org.sonarsource.sonarlint.core.client.api.common.LogOutput.Level;
 import org.sonarsource.sonarlint.core.client.api.common.RuleKey;
+import org.sonarsource.sonarlint.core.client.api.common.TextRange;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.AnalysisResults;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.ClientInputFile;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
@@ -45,11 +48,11 @@ import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneGlobalConf
 
 public final class Analyzer {
 
-	private static final Map<Language, String> pluginURLs = new HashMap<Language, String>() {
-		{
-			this.put(Language.JAVA, "https://repo1.maven.org/maven2/org/sonarsource/java/sonar-java-plugin/6.15.1.26025/sonar-java-plugin-6.15.1.26025.jar");
-		}
-	};
+	private static final Map<Language, String> pluginURLs = new EnumMap<>(Language.class);
+
+	static {
+		pluginURLs.put(Language.JAVA, "https://repo1.maven.org/maven2/org/sonarsource/java/sonar-java-plugin/6.15.1.26025/sonar-java-plugin-6.15.1.26025.jar");
+	}
 
 	public enum IssueSeverity {
 		BLOCKER, CRITICAL, MAJOR, MINOR, INFO;
@@ -75,69 +78,88 @@ public final class Analyzer {
 		private StandaloneSonarLintEngineImpl engine;
 	}
 
-	public static Analysis lint(Map<String, ?> properties) throws IOException {
-		final Map<String, String> props = properties.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue().toString()));
-		final Path baseDir = Paths.get(Optional.ofNullable(props.get("base.dir"))
+	private static final class ScannerProperties {
+		private Path baseDir;
+		private List<Language> languages;
+		private IssueSeverity severityLevel;
+		private Set<String> issueIgnore;
+		private Set<String> ruleExclude;
+		private List<ClientInputFile> sources;
+		private List<ClientInputFile> testSources;
+		private Map<String, String> raw;
+	}
+
+	private static ScannerProperties setup(Map<String, ?> properties) throws IOException {
+		final ScannerProperties sp = new ScannerProperties();
+		sp.raw = properties.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue().toString()));
+		sp.baseDir = Paths.get(Optional.ofNullable(sp.raw.get("base.dir"))
 				.orElse(System.getProperty("user.dir")));
-		final List<Language> languages = Arrays.stream(Objects.requireNonNull(props.get("lang"), "lang").split(","))
+		sp.languages = Arrays.stream(Objects.requireNonNull(sp.raw.get("lang"), "lang").split(","))
 				.map(l -> Language.forKey(l.toLowerCase()).orElseThrow(() -> new InstantiationError(l + " is not a supported language")))
 				.collect(Collectors.toList());
-		final IssueSeverity severityLevel = Optional.ofNullable(props.get("severity.level"))
+		sp.severityLevel = Optional.ofNullable(sp.raw.get("severity.level"))
 				.map(s -> IssueSeverity.valueOf(s.toUpperCase()))
 				.orElse(IssueSeverity.INFO);
-		final Set<String> issueIgnore = Optional.ofNullable(props.get("issue.ignore"))
+		sp.issueIgnore = Optional.ofNullable(sp.raw.get("issue.ignore"))
 				.map(s -> new HashSet<>(Arrays.asList(s.split(","))))
 				.orElse(new HashSet<>());
-		final Set<String> ruleExclude = Optional.ofNullable(props.get("rule.exclude"))
+		sp.ruleExclude = Optional.ofNullable(sp.raw.get("rule.exclude"))
 				.map(s -> new HashSet<>(Arrays.asList(s.split(","))))
 				.orElse(new HashSet<>());
-		final Optional<String> issueIgnoreFile = Optional.ofNullable(props.get("issue.ignore.file"));
+		final Optional<String> issueIgnoreFile = Optional.ofNullable(sp.raw.get("issue.ignore.file"));
 		if (issueIgnoreFile.isPresent()) {
-			issueIgnore.addAll(readFile(issueIgnoreFile.get()));
+			sp.issueIgnore.addAll(readFile(issueIgnoreFile.get()));
 		}
-		final Optional<String> ruleExcludeFile = Optional.ofNullable(props.get("rule.exclude.file"));
+		final Optional<String> ruleExcludeFile = Optional.ofNullable(sp.raw.get("rule.exclude.file"));
 		if (ruleExcludeFile.isPresent()) {
-			ruleExclude.addAll(readFile(ruleExcludeFile.get()));
-		}
-		final StandaloneGlobalConfiguration.Builder scb = StandaloneGlobalConfiguration.builder().setExtraProperties(props);
-		for (Language lang : languages) {
-			scb.addEnabledLanguage(lang).addPlugin(cachePlugin(lang));
-		}
-		final StandaloneGlobalConfiguration sc = scb.build();
-		final StandaloneAnalysisConfiguration.Builder sacb = StandaloneAnalysisConfiguration.builder().setBaseDir(baseDir);
-		final BiConsumer<String, Boolean> addFiles = (k, b) -> {
-			final Optional<String> p = Optional.ofNullable(props.get(k));
-			if (p.isPresent()) {
-				for (String s : p.get().split(",")) {
-					try {
-						final Path path = Paths.get(s);
-						if (Files.exists(path)) {
-							sacb.addInputFiles(Files.walk(path)
-								.filter(Files::isRegularFile)
-								.distinct()
-								.map(asClientInputFile(baseDir, b))
-								.collect(Collectors.toList()));
-						}
-					} catch (IOException e1) {
-						e1.printStackTrace();
+			sp.ruleExclude.addAll(readFile(ruleExcludeFile.get()));
+		};
+		sp.sources = findSources(sp.baseDir, sp.raw.get("sonar.sources"), false);
+		sp.testSources = findSources(sp.baseDir, sp.raw.get("sonar.tests"), true);
+		return sp;
+	}
+
+	private static List<ClientInputFile> findSources(Path baseDir, String property, boolean test) throws IOException {
+		final Optional<String> p = Optional.ofNullable(property);
+		if (p.isPresent()) {
+			for (String s : p.get().split(",")) {
+				final Path path = Paths.get(s);
+				if (Files.exists(path)) {
+					try (Stream<Path> walk = Files.walk(path)) {
+						return walk.filter(Files::isRegularFile)
+							.distinct()
+							.map(asClientInputFile(baseDir, test))
+							.collect(Collectors.toList());
 					}
 				}
 			}
-		};
-		addFiles.accept("sonar.sources", false);
-		addFiles.accept("sonar.tests", true);
-		ruleExclude.stream().map(RuleKey::parse).forEach(sacb::addExcludedRule);
-		final StandaloneAnalysisConfiguration sac = sacb.build();
+		}
+		return Collections.emptyList();
+	}
+
+	public static Analysis lint(Map<String, ?> properties) throws IOException {
+		final ScannerProperties props = setup(properties);
+		final StandaloneGlobalConfiguration.Builder scb = StandaloneGlobalConfiguration.builder()
+			.setExtraProperties(props.raw);
+		for (Language lang : props.languages) {
+			scb.addEnabledLanguage(lang);
+			scb.addPlugin(cachePlugin(lang));
+		}
+		final StandaloneAnalysisConfiguration.Builder sacb = StandaloneAnalysisConfiguration.builder()
+			.setBaseDir(props.baseDir)
+			.addInputFiles(props.sources)
+			.addInputFiles(props.testSources)
+			.addExcludedRules(props.ruleExclude.stream().map(RuleKey::parse).collect(Collectors.toList()));
 		final List<String> ignored = new LinkedList<>();
 		final List<Finding> findings = new ArrayList<>();
-		final StandaloneSonarLintEngineImpl engine = new StandaloneSonarLintEngineImpl(sc);
-		final AnalysisResults results = engine.analyze(sac, i -> {
-			if (IssueSeverity.valueOf(i.getSeverity()).ordinal() > severityLevel.ordinal()) {
+		final StandaloneSonarLintEngineImpl engine = new StandaloneSonarLintEngineImpl(scb.build());
+		final AnalysisResults results = engine.analyze(sacb.build(), i -> {
+			if (IssueSeverity.valueOf(i.getSeverity()).ordinal() > props.severityLevel.ordinal()) {
 				return;
 			}
 			try {
 				final String hash = hash(i);
-				if (!issueIgnore.contains(hash)) {
+				if (!props.issueIgnore.contains(hash)) {
 					findings.add(finding(i, hash));
 				} else {
 					ignored.add(hash);
@@ -147,14 +169,14 @@ public final class Analyzer {
 			}
 		}, logger(), null);
 		Collections.sort(findings, (lhs, rhs) -> Integer.compare(lhs.severity.ordinal(), rhs.severity.ordinal()));
-		final List<String> unusedIgnores = new LinkedList<>(issueIgnore);
+		final List<String> unusedIgnores = new LinkedList<>(props.issueIgnore);
 		unusedIgnores.removeAll(ignored);
 		final Analysis analysis = new Analysis();
 		analysis.results = results;
 		analysis.findings = findings;
 		analysis.unusedIgnores = unusedIgnores;
 		analysis.engine = engine;
-		analysis.severityLevel = severityLevel;
+		analysis.severityLevel = props.severityLevel;
 		return analysis;
 	}
 
@@ -178,7 +200,7 @@ public final class Analyzer {
 		return plugin.toURI().toURL();
 	}
 
-	private static Finding finding(Issue i, String hash) throws NoSuchAlgorithmException, IOException {
+	private static Finding finding(Issue i, String hash) throws IOException {
 		final String ln = System.lineSeparator();
 		final String ls = "| ";
 		final StringBuilder sb = new StringBuilder();
@@ -189,17 +211,20 @@ public final class Analyzer {
 		sb.append(ls).append("Rule: ").append(i.getRuleName()).append(ln);
 		sb.append(ls).append("Message: ").append(i.getMessage()).append(ln);
 		sb.append(ls).append(ln);
-		sb.append(ls).append("File: ").append(i.getInputFile().relativePath());
-		if (i.getTextRange() != null) {
-			sb.append(":").append(i.getStartLine()).append(ln);
-			final String[] lines = i.getInputFile().contents().split(ln);
-			for (int j = i.getStartLine() - 1, k = i.getEndLine(); j < k; ++j) {
-				sb.append(ls).append("> ").append(lines[j].trim()).append(ln);
+		final ClientInputFile file = i.getInputFile();
+		if (file != null) {
+			sb.append(ls).append("File: ").append(file.relativePath());
+			if (i.getTextRange() != null) {
+				sb.append(":").append(i.getStartLine()).append(ln);
+				final String[] lines = file.contents().split(ln);
+				for (int j = i.getStartLine() - 1, k = i.getEndLine(); j < k; ++j) {
+					sb.append(ls).append("> ").append(lines[j].trim()).append(ln);
+				}
+			} else {
+				sb.append(ln);
 			}
-		} else {
-			sb.append(ln);
+			sb.append(ls).append(ln);
 		}
-		sb.append(ls).append(ln);
 		sb.append(ls).append("Reference: ").append(hash).append(ln);
 		sb.append("+------------------->").append(ln);
 		final Finding finding = new Finding();
@@ -212,12 +237,9 @@ public final class Analyzer {
 	}
 
 	private static LogOutput logger() {
-		return new LogOutput() {
-			@Override
-			public void log(String formattedMessage, Level level) {
-				if (level.ordinal() <= Level.WARN.ordinal() && !"No workDir in SonarLint".equals(formattedMessage) ) {
-					System.err.println(String.format("%s [%s] %s", Instant.now(), level.toString(), formattedMessage));
-				}
+		return (formattedMessage, level) -> {
+			if (level.ordinal() <= Level.WARN.ordinal() && !"No workDir in SonarLint".equals(formattedMessage) ) {
+				System.err.println(String.format("%s [%s] %s", Instant.now(), level.toString(), formattedMessage));
 			}
 		};
 	}
@@ -270,19 +292,25 @@ public final class Analyzer {
 			tab.apply(3).append("\"type\": ").append('"').append(f.type.toString()).append('"').append(',').append(ln);
 			tab.apply(3).append("\"rule_key\": ").append('"').append(f.issue.getRuleKey()).append('"').append(',').append(ln);
 			tab.apply(3).append("\"rule_name\": ").append('"').append(f.issue.getRuleName().replace("\\", "\\\\").replace("\"", "\\\"")).append('"').append(',').append(ln);
-			tab.apply(3).append("\"message\": ").append('"').append(f.issue.getMessage().replace("\\", "\\\\").replace("\"", "\\\"")).append('"').append(',').append(ln);
-			tab.apply(3).append("\"location\": {").append(ln);
-			tab.apply(4).append("\"file\": ").append('"').append(f.issue.getInputFile().relativePath().replace("\\", "/")).append('"');
-			if (f.issue.getTextRange() != null) {
-				sb.append(',').append(ln);
-				tab.apply(4).append("\"start_line\": ").append(f.issue.getStartLine()).append(',').append(ln);
-				tab.apply(4).append("\"start_line_offset\": ").append(f.issue.getStartLineOffset()).append(',').append(ln);
-				tab.apply(4).append("\"end_line\": ").append(f.issue.getEndLine()).append(',').append(ln);
-				tab.apply(4).append("\"end_line_offset\": ").append(f.issue.getEndLineOffset()).append(ln);
-			} else {
-				sb.append(ln);
+			final String message = f.issue.getMessage();
+			if (message != null) {
+				tab.apply(3).append("\"message\": ").append('"').append(message.replace("\\", "\\\\").replace("\"", "\\\"")).append('"').append(',').append(ln);
 			}
-			tab.apply(3).append("},").append(ln);
+			final ClientInputFile file = f.issue.getInputFile();
+			if (file != null) {
+				tab.apply(3).append("\"location\": {").append(ln);
+				tab.apply(4).append("\"file\": ").append('"').append(file.relativePath().replace("\\", "/")).append('"');
+				if (f.issue.getTextRange() != null) {
+					sb.append(',').append(ln);
+					tab.apply(4).append("\"start_line\": ").append(f.issue.getStartLine()).append(',').append(ln);
+					tab.apply(4).append("\"start_line_offset\": ").append(f.issue.getStartLineOffset()).append(',').append(ln);
+					tab.apply(4).append("\"end_line\": ").append(f.issue.getEndLine()).append(',').append(ln);
+					tab.apply(4).append("\"end_line_offset\": ").append(f.issue.getEndLineOffset()).append(ln);
+				} else {
+					sb.append(ln);
+				}
+				tab.apply(3).append("},").append(ln);
+			}
 			tab.apply(3).append("\"ref\": ").append('"').append(f.ref).append('"').append(ln);
 			tab.apply(2).append("}");
 			if (i != last) {
@@ -333,22 +361,35 @@ public final class Analyzer {
 		};
 	}
 
-	private static String hash(Issue issue) throws NoSuchAlgorithmException {
+	private static String hash(Issue issue) throws NoSuchAlgorithmException, IOException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-1");
 		final List<String> properties = new LinkedList<>();
+		final ClientInputFile file = issue.getInputFile();
+		final TextRange textRange = issue.getTextRange();
+		final String message = issue.getMessage();
 		properties.add(issue.getRuleKey());
-		properties.add(issue.getInputFile().relativePath());
-		if (issue.getTextRange() != null) {
-			properties.add(issue.getStartLine().toString());
-			properties.add(issue.getEndLine().toString());
-			properties.add(issue.getStartLineOffset().toString());
-			properties.add(issue.getEndLineOffset().toString());
+		if (message != null) {
+			properties.add(issue.getMessage());
 		}
-		return Base64.getUrlEncoder().withoutPadding().encodeToString(md.digest(String.join(";" ,properties).getBytes()));
+		if (file != null) {
+			properties.add(file.relativePath());
+			if (textRange != null) {
+				final String[] lines = file.contents().split(System.lineSeparator());
+				for (int j = issue.getStartLine() - 1, k = issue.getEndLine(); j < k; ++j) {
+					properties.add(lines[j].trim());
+				}
+			}
+		}
+		return Base64.getUrlEncoder().withoutPadding().encodeToString(md.digest(String.join(";", properties).getBytes()));
 	}
 
 	private static List<String> readFile(String filePath) throws IOException {
-		return Files.lines(Paths.get(filePath)).map(l -> l.trim()).collect(Collectors.toList());
+		try (Stream<String> lines = Files.lines(Paths.get(filePath))) {
+			return lines.map(String::trim)
+				.filter(l -> !l.isEmpty())
+				.filter(l -> !l.startsWith("//"))
+				.collect(Collectors.toList());
+		}
 	}
 
 	private static Map<String, String> parse(String[] args) {

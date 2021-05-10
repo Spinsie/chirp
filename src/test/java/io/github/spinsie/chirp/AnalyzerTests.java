@@ -7,15 +7,19 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-
+import io.github.spinsie.chirp.Analyzer.Analysis;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -64,5 +68,29 @@ public class AnalyzerTests {
 		} finally {
 			System.setOut(old);
 		}
+	}
+
+	@Test
+	public void qualityTest() throws IOException {
+		final String libraryPaths = String.join(",", Arrays.stream(System.getProperty("java.class.path").split(File.pathSeparator))
+				.filter(s -> Files.exists(Paths.get(s)))
+				.collect(Collectors.toList()));
+		final Analysis a = Analyzer.lint(new HashMap<String, String>() {
+			{
+				put("lang", "java");
+				put("severity.level", "major");
+				put("rule.exclude.file", ".chirp/rule.exclude");
+				//main
+				put("sonar.sources", "src/main/java");
+				put("sonar.java.binaries", "build/classes/java/main");
+				put("sonar.java.libraries", libraryPaths);
+				// test
+				put("sonar.tests", "src/test/java");
+				put("sonar.java.test.binaries", "build/classes/java/test");
+				put("sonar.java.test.libraries", libraryPaths);
+			}
+		});
+		assertEquals("Unused Ignores " + a.unusedIgnores.toString(), 0, a.unusedIgnores.size());
+		assertEquals(a.findings.stream().map(f -> System.lineSeparator() + f.message).collect(Collectors.joining()), 0, a.findings.size());
 	}
 }
