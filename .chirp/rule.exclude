@@ -1,4 +1,4 @@
-// Standard outputs should not be used directly to log anything
-java:S106
-// Deprecated elements should have both the annotation and the Javadoc tag
-java:S1123
+// Excludes the following rules
+
+java:S106	// Standard outputs should not be used directly to log anything
+java:S1123	// Deprecated elements should have both the annotation and the Javadoc tag

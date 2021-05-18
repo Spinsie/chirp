@@ -15,7 +15,7 @@ jobs:
         distribution: 'adopt'
 
     - name: Build with Gradle
-      run: gradle build
+      run: gradle build jacocoTestReport
       continue-on-error: true
 
     - name: Publish Test Report

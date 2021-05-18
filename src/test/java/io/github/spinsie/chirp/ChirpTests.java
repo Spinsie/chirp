@@ -6,11 +6,15 @@ import static org.junit.Assert.assertTrue;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonIOException;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
 import io.github.spinsie.chirp.Chirp.Analysis;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -36,11 +40,84 @@ public class ChirpTests {
 	}
 
 	@Test
-	public void testJava() throws IOException {
+	public void testJavaCli() throws IOException {
 		final String command = "--lang java --sonar-sources its/java --sonar-java-binaries build/its/java --output-file build/its/java/findings.json";
 		Chirp.main(command.split(" "));
+		final File f = Paths.get("build/its/java/findings.json").toFile();
+		assertJsonFindings(f);
+		f.delete();
+	}
+
+	@Test
+	public void testJavaApi() throws IOException {
+		final Map<String, String> props = new HashMap<>();
+		props.put("lang", "java");
+		props.put("sonar.sources", "its/java");
+		props.put("sonar.java.binaries", "build/its/java");
+		final Analysis a = Chirp.scan(props);
+		final File f = Paths.get("build/its/java/findings.json").toFile();
+		a.export(f);
+		assertJsonFindings(f);
+		f.delete();
+	}
+
+	@Test
+	public void testSeverityLevel() throws IOException {
+		final Map<String, String> props = new HashMap<>();
+		props.put("lang", "java");
+		props.put("severity.level", "none");
+		props.put("sonar.sources", "its/java");
+		props.put("sonar.java.binaries", "build/its/java");
+		final Analysis a = Chirp.scan(props);
+		assertEquals(0, a.findings().size());
+	}
+
+	@Test
+	public void testSeverityLevelOverride() throws IOException {
+		final Map<String, String> props = new HashMap<>();
+		props.put("lang", "java");
+		props.put("severity.level", "none");
+		props.put("sonar.sources", "its/java");
+		props.put("sonar.java.binaries", "build/its/java");
+		props.put("rule.include", "java:S106");
+		final Analysis a = Chirp.scan(props);
+		assertEquals(1, a.findings().size());
+	}
+
+	@Test
+	public void testRuleParameterKey() throws IOException {
+		final Map<String, String> props = new HashMap<>();
+		props.put("lang", "java");
+		props.put("severity.level", "none");
+		props.put("sonar.sources", "its/java");
+		props.put("sonar.java.binaries", "build/its/java");
+		props.put("rule.include", "java:S100");
+		props.put("java:S100.format", "^[a-z][a-zA-Z0-9_]*$");
+		final Analysis a = Chirp.scan(props);
+		assertEquals(0, a.findings().size());
+	}
+	@Test
+	public void testRuleParameterFile() throws IOException {
+		final File f = new File("build/tmp/rule.param");
+		try (FileWriter fw = new FileWriter(f)) {
+			fw.write("java:S100.format = ^[a-z][a-zA-Z0-9_]*$");
+			fw.flush();
+		}
+		final Map<String, String> props = new HashMap<>();
+		props.put("lang", "java");
+		props.put("severity.level", "none");
+		props.put("sonar.sources", "its/java");
+		props.put("sonar.java.binaries", "build/its/java");
+		props.put("rule.include", "java:S100");
+		props.put("rule.param.file", "build/tmp/rule.param");
+		final Analysis a = Chirp.scan(props);
+		assertEquals(0, a.findings().size());
+		f.delete();
+	}
+
+	private void assertJsonFindings(File f) throws JsonSyntaxException, JsonIOException, FileNotFoundException {
 		final Gson gson = new Gson();
-		final JsonObject findings = gson.fromJson(new FileReader(Paths.get("build/its/java/findings.json").toFile()), JsonObject.class);
+		final JsonObject findings = gson.fromJson(new FileReader(f), JsonObject.class);
 		final JsonArray a = findings.get("findings").getAsJsonArray();
 		assertEquals("issue count", ruleKeys.size(), a.size());
 		for (JsonElement e : a) {

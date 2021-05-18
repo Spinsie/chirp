@@ -23,28 +23,6 @@ jacocoTestReport {
 	}
 }
 
-task calculateCoverage {
-	dependsOn jacocoTestReport
-	doLast {
-		if (System.env('CI') == null) {
-			return
-		}
-		def slurper = new XmlSlurper()
-		slurper.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false)
-		slurper.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-		def reportFile = file("$buildDir/reports/jacoco/test/jacocoTestReport.xml")
-		def report = slurper.parse(reportFile)
-		def coverages = report.counter.find { it.'@type' == 'INSTRUCTION' }
-		double missed = coverages.@missed.toDouble()
-		double covered = coverages.@covered.toDouble()
-		def coverage = (covered / (missed + covered) * 100).round(1)
-		exec {
-			commandLine 'export', "COVERAGE=$coverage"
-			commandLine 'export', 'COVERAGE_COLOR=:brightgreen'
-		}
-	}
-}
-
 java {
 	sourceCompatibility = JavaVersion.VERSION_1_8
 	targetCompatibility = JavaVersion.VERSION_1_8
