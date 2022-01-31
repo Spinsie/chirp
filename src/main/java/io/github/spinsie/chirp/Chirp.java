@@ -37,16 +37,17 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.sonarsource.sonarlint.core.StandaloneSonarLintEngineImpl;
-import org.sonarsource.sonarlint.core.client.api.common.Language;
-import org.sonarsource.sonarlint.core.client.api.common.LogOutput;
-import org.sonarsource.sonarlint.core.client.api.common.LogOutput.Level;
+import org.sonarsource.sonarlint.core.analysis.api.AnalysisResults;
+import org.sonarsource.sonarlint.core.analysis.api.ClientInputFile;
+import org.sonarsource.sonarlint.core.analysis.api.TextRange;
 import org.sonarsource.sonarlint.core.client.api.common.RuleKey;
-import org.sonarsource.sonarlint.core.client.api.common.TextRange;
-import org.sonarsource.sonarlint.core.client.api.common.analysis.AnalysisResults;
-import org.sonarsource.sonarlint.core.client.api.common.analysis.ClientInputFile;
 import org.sonarsource.sonarlint.core.client.api.common.analysis.Issue;
 import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneAnalysisConfiguration;
 import org.sonarsource.sonarlint.core.client.api.standalone.StandaloneGlobalConfiguration;
+import org.sonarsource.sonarlint.core.commons.Language;
+import org.sonarsource.sonarlint.core.commons.log.ClientLogOutput;
+import org.sonarsource.sonarlint.core.commons.log.ClientLogOutput.Level;
+
 
 /**
  * Provides clients an API or main entrypoint for code analysis.
@@ -59,7 +60,7 @@ public final class Chirp {
 	private static final Pattern RULE_PARAM = Pattern.compile("^\\w+:\\w+\\.\\w+$");
 
 	static {
-		pluginURLs.put(Language.JAVA, "https://repo1.maven.org/maven2/org/sonarsource/java/sonar-java-plugin/6.15.1.26025/sonar-java-plugin-6.15.1.26025.jar");
+		pluginURLs.put(Language.JAVA, "https://repo1.maven.org/maven2/org/sonarsource/java/sonar-java-plugin/7.8.0.28662/sonar-java-plugin-7.8.0.28662.jar");
 	}
 
 	private static final class RuleParameter {
@@ -241,7 +242,7 @@ public final class Chirp {
 		return Collections.emptyList();
 	}
 
-	private static URL cachePlugin(Language lang) throws IOException {
+	private static Path cachePlugin(Language lang) throws IOException {
 		final String url = Objects.requireNonNull(pluginURLs.get(lang));
 		final boolean windows = System.getProperty("os.name").contains("Windows");
 		final Path cache;
@@ -258,7 +259,7 @@ public final class Chirp {
 				fos.getChannel().transferFrom(rbs, 0, Long.MAX_VALUE);
 			}
 		}
-		return plugin.toURI().toURL();
+		return plugin.toPath();
 	}
 
 	private static Finding finding(Issue i, String hash) throws IOException {
@@ -269,7 +270,6 @@ public final class Chirp {
 		sb.append(ls).append("Type: ").append(i.getType()).append(ln);
 		sb.append(ls).append("Severity: ").append(i.getSeverity()).append(ln);
 		sb.append(ls).append("RuleKey: ").append(i.getRuleKey()).append(ln);
-		sb.append(ls).append("Rule: ").append(i.getRuleName()).append(ln);
 		sb.append(ls).append("Message: ").append(i.getMessage()).append(ln);
 		sb.append(ls).append(ln);
 		final ClientInputFile file = i.getInputFile();
@@ -297,7 +297,7 @@ public final class Chirp {
 		return finding;
 	}
 
-	private static LogOutput logger() {
+	private static ClientLogOutput logger() {
 		return (formattedMessage, level) -> {
 			if (level.ordinal() <= Level.WARN.ordinal() && !"No workDir in SonarLint".equals(formattedMessage) ) {
 				System.err.println(String.format("%s [%s] %s", Instant.now(), level.toString(), formattedMessage));
@@ -323,8 +323,8 @@ public final class Chirp {
 		final String ls = "| ";
 		final StringBuilder sb = new StringBuilder();
 		sb.append("+----- Sonarlint Analysis ----->").append(ln);
-		sb.append(ls).append("Active Rules: ").append(config.getGlobalContainer().getActiveRuleKeys().stream().map(k -> config.getRuleDetails(k)).filter(d -> IssueSeverity.valueOf(d.get().getSeverity()).ordinal() <= severityLevel.ordinal()).count()).append(ln);
-		sb.append(ls).append("Plugins: ").append(config.getGlobalContainer().getPluginDetails().stream().map(info -> info.name()).collect(Collectors.toList())).append(ln);
+		sb.append(ls).append("Active Rules: ").append(config.getAllRuleDetails().stream().filter(d -> IssueSeverity.valueOf(d.getSeverity()).ordinal() <= severityLevel.ordinal()).count()).append(ln);
+		sb.append(ls).append("Plugins: ").append(config.getPluginDetails().stream().map(info -> info.name()).collect(Collectors.toList())).append(ln);
 		sb.append("+------------------------------>").append(ln);
 		return sb.toString();
 	}
@@ -352,7 +352,6 @@ public final class Chirp {
 			tab.apply(3).append("\"severity\": ").append('"').append(f.severity().toString()).append('"').append(',').append(ln);
 			tab.apply(3).append("\"type\": ").append('"').append(f.type().toString()).append('"').append(',').append(ln);
 			tab.apply(3).append("\"rule_key\": ").append('"').append(f.issue().getRuleKey()).append('"').append(',').append(ln);
-			tab.apply(3).append("\"rule_name\": ").append('"').append(f.issue().getRuleName().replace("\\", "\\\\").replace("\"", "\\\"")).append('"').append(',').append(ln);
 			final String message = f.issue().getMessage();
 			if (message != null) {
 				tab.apply(3).append("\"message\": ").append('"').append(message.replace("\\", "\\\\").replace("\"", "\\\"")).append('"').append(',').append(ln);

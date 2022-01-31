@@ -10,7 +10,7 @@ repositories {
 }
 
 dependencies {
-	implementation 'org.sonarsource.sonarlint.core:sonarlint-core:5.3.1.31327'
+	implementation 'org.sonarsource.sonarlint.core:sonarlint-core:8.0.2.42487'
 	testImplementation 'junit:junit:4.13.2'
 	testImplementation 'com.google.code.gson:gson:2.8.6'
 }
